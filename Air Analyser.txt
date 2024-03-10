@@ -1,0 +1,242 @@
+//Include the library
+#include <Wire.h>
+#include <Adafruit_SSD1306.h>
+#include <Adafruit_ADS1X15.h>
+#include <Adafruit_GFX.h>
+#include <DHT.h>
+#include <WiFi.h>
+#include <Preferences.h>
+#include <MQUnifiedsensor.h>
+//definations for MQ-2******************************************
+#define         Board                   ("ESP32")
+#define         PIn                     (25)  //digital input of your ESP32
+#define         TYpe                    ("MQ2") //MQ2
+#define         Voltage_Resolution      (5)
+#define         ADC_Bit_Resolution      (12) // For ESP32
+#define         RatioMQ2CleanAir        (9.83) //RS / R0 = 9.83 ppm 
+//Definitions FOR MQ-5******************************************
+#define         placa                   ("ESP32")
+#define         Voltage_Resolution      (5)
+#define         pin                     (23) //digital input of your esp32
+#define         type                    ("MQ5") //MQ5
+#define         ADC_Bit_Resolution      (12) // For esp32
+#define         RatioMQ5CleanAir        (6.5)  //RS / R0 = 6.5 ppm 
+//#define calibration_button 12 //Pin to calibrate your sensor
+// Defination for MQ-135******************************************
+#define         Board                   ("ESP-32") // Wemos ESP-32 or other board, whatever have ESP32 core.
+#define         Pin                     (18) //check the esp32-wroom-32d.jpg image on ESP32 folder
+#define         Type                    ("MQ135") //MQ135 or other MQ Sensor, if change this verify your a and b values.
+#define         Voltage_Resolution      (5) // 3V3 <- IMPORTANT.
+#define         ADC_Bit_Resolution      (12) // ESP-32 bit resolution. Source:
+#define         RatioMQ135CleanAir      (9.83) //RS / R0 = 9.83 ppm
+Adafruit_ADS1115 ads;
+float factorEscala = 0.1875F;
+//defination for dht sensor******************************************
+// - For ESP32: Connect the sensor to pin GPIO2 or P2.
+// - For ESP8266: Connect the sensor to GPIO2 or D4.
+
+
+
+
+/**********Globals****************/
+MQUnifiedsensor MQ2(Board, Voltage_Resolution, ADC_Bit_Resolution, PIn, TYpe);
+MQUnifiedsensor MQ5(placa, Voltage_Resolution, ADC_Bit_Resolution, pin, type);
+MQUnifiedsensor MQ135(Board, Voltage_Resolution, ADC_Bit_Resolution, Pin, Type);
+/**********Globals****************/
+
+//wifi stuff
+const char* ssid     = "vivo";
+const char* password = "12345678";
+
+
+
+void setup() {
+  //setup for MQ-2**********************************************
+  //Init the serial port communication - to debug the library
+  Serial.begin(9600); //Init serial port
+
+  //Set math model to calculate the PPM concentration and the value of constants
+  MQ2.setRegressionMethod(1); //_PPM =  a*ratio^b
+  MQ2.setA(658.71); MQ2.setB(-2.168); // Configure the equation to to calculate propane concentration
+  /*
+    Exponential regression:
+    Gas    | a      | b
+    H2     | 987.99 | -2.162
+    LPG    | 574.25 | -2.222
+    CO     | 36974  | -3.109
+    Alcohol| 3616.1 | -2.675
+    Propane| 658.71 | -2.168
+  */
+
+  /**********  MQ Init ***************/  
+  MQ2.init(); 
+  /* 
+    //If the RL value is different from 10K please assign your RL value with the following method:
+    MQ2.setRL(10);
+  */
+  /**********  MQ CAlibration ***************/ 
+  // Explanation: 
+   // In this routine the sensor will measure the resistance of the sensor supposedly before being pre-heated
+  // and on clean air (Calibration conditions), setting up R0 value.
+  // We recomend executing this routine only on setup in laboratory conditions.
+  // This routine does not need to be executed on each restart, you can load your R0 value from eeprom.
+  Serial.print("Calibrating please wait.");
+  float calcR0 = 0;
+  for(int i = 1; i<=10; i ++)
+  {
+    MQ2.update(); // Update data, the esp32 will read the voltage from the digtal pin
+    calcR0 += MQ2.calibrate(RatioMQ2CleanAir);
+    Serial.print(".");
+  }
+  MQ2.setR0(calcR0/10);
+  Serial.println("  done!.");
+  
+  
+  if(calcR0 == 0){Serial.println("Warning: Conection issue found, R0 is zero (digital pin shorts to ground) please check your wiring and supply"); while(1);}
+  /**********  MQ CAlibration ***************/ 
+
+  MQ2.serialDebug(true);
+ //Init the serial port communication - to debug the library
+ 
+ //SETUP FOE MQ-5********************************************
+  Serial.begin(9600); //Init serial port
+
+  //Set math model to calculate the PPM concentration and the value of constants 
+  MQ5.setRegressionMethod(1); //_PPM =  a*ratio^b
+  MQ5.setA(80.897); MQ5.setB(-2.431); // Configure the equation to to calculate lpg concentration
+  /*
+    Exponential regression:
+  Gas    | a      | b
+  H2     | 1163.8 | -3.874
+  LPG    | 80.897 | -2.431
+  CH4    | 177.65 | -2.56
+  CO     | 491204 | -5.826
+  Alcohol| 97124  | -4.918
+  */
+  
+  /**********  MQ Init ***************/ 
+  //Remarks: Configure the pin of esp32 as input.
+  /****************************/ 
+  MQ5.init();   
+  /* 
+    //If the RL value is different from 10K please assign your RL value with the following method:
+    MQ5.setRL(10);
+  */
+  /**********  MQ CAlibration ***************/ 
+  // Explanation: 
+   // In this routine the sensor will measure the resistance of the sensor supposedly before being pre-heated
+  // and on clean air (Calibration conditions), setting up R0 value.
+  // We recomend executing this routine only on setup in laboratory conditions.
+  // This routine does not need to be executed on each restart, you can load your R0 value from eeprom.
+  Serial.print("Calibrating please wait.");
+  float calcR0MQ5 = 0;
+  for(int i = 1; i<=10; i ++)
+  {
+    MQ5.update(); // Update data, the esp32 will read the voltage from the digital pin
+    calcR0MQ5 += MQ5.calibrate(RatioMQ5CleanAir);
+    Serial.print(".");
+  }
+  MQ5.setR0(calcR0MQ5/10);
+  Serial.println("  done!.");
+  
+  if(isinf(calcR0MQ5)) {Serial.println("Warning: Conection issue, R0 is infinite (Open circuit detected) please check your wiring and supply"); while(1);}
+  if(calcR0MQ5 == 0){Serial.println("Warning: Conection issue found, R0 is zero (digital pin shorts to ground) please check your wiring and supply"); while(1);}
+  /**********  MQ CAlibration ***************/ 
+  MQ5.serialDebug(true);
+
+  //setup for MQ-135************************************************
+   //Init the serial port communication - to debug the library
+  Serial.begin(9600); //Init serial port
+  delay(200);
+
+  //Set math model to calculate the PPM concentration and the value of constants
+  MQ135.setRegressionMethod(1); //_PPM =  a*ratio^b
+
+  /****************************/ 
+  MQ135.init(); 
+ 
+  // Iniciar el ADS1115
+  ads.begin();
+
+
+  Serial.print("Calibrating please wait.");
+  float calcR0mq135 = 0;
+  for(int i = 1; i<=10; i ++)
+  {
+    // Obtener datos del A0 del ADS1115
+    short adc0 = ads.readADC_SingleEnded(0);
+    float voltios = (adc0 * factorEscala)/1000.0;
+    MQ135.externalADCUpdate(voltios); // Update data, the ESP32 will read the voltage from the digital pin
+    calcR0mq135 += MQ135.calibrate(RatioMQ135CleanAir);
+    Serial.print(".");
+  }
+  MQ135.setR0(calcR0mq135/10);
+  Serial.println("  done!.");
+
+  if(isinf(calcR0mq135)) {Serial.println("Warning: Conection issue, R0 is infinite (Open circuit detected) please check your wiring and supply"); while(1);}
+  if(calcR0mq135 == 0){Serial.println("Warning: Conection issue found, R0 is zero (Digital pin shorts to ground) please check your wiring and supply"); while(1);}
+  /**********  MQ CAlibration ***************/ 
+  Serial.println("* Values from MQ-135 ***");
+  Serial.println("|    CO   |  Alcohol |   CO2  |  Toluen  |  NH4  |  Aceton  |");  
+}
+
+void loop() {
+  //LOOP FOR MQ-2*********************************************
+  MQ2.update(); // Update data, the esp32 will read the voltage from the digital pin
+  MQ2.readSensor(); // Sensor will read PPM concentration using the model, a and b values set previously or from the setup
+  MQ2.serialDebug(); // Will print the table on the serial port
+  delay(500); //Sampling frequency
+  //LOOP FOR MQ-5*********************************************
+  MQ5.update(); // Update data, the esp32 will read the voltage from the digital pin
+  MQ5.readSensor(); // Sensor will read PPM concentration using the model, a and b values set previously or from the setup
+  MQ5.serialDebug(); // Will print the table on the serial port
+  delay(500); //Sampling frequency
+  //LOOP FOR MQ-135*********************************************
+  // Obtener datos del A0 del ADS1115
+  short adc0 = ads.readADC_SingleEnded(0);
+  float voltios = (adc0 * factorEscala)/1000.0;
+  MQ135.externalADCUpdate(voltios); // Update data, the ESP32 will read the voltage from the digital pin
+
+  MQ135.setA(605.18); MQ135.setB(-3.937); // Configure the equation to calculate CO concentration value
+  float CO = MQ135.readSensor(); // Sensor will read PPM concentration using the model, a and b values set previously or from the setup
+
+  MQ135.setA(77.255); MQ135.setB(-3.18); //Configure the equation to calculate Alcohol concentration value
+  float Alcohol = MQ135.readSensor(); // SSensor will read PPM concentration using the model, a and b values set previously or from the setup
+
+  MQ135.setA(110.47); MQ135.setB(-2.862); // Configure the equation to calculate CO2 concentration value
+  float CO2 = MQ135.readSensor(); // Sensor will read PPM concentration using the model, a and b values set previously or from the setup
+
+  MQ135.setA(44.947); MQ135.setB(-3.445); // Configure the equation to calculate Toluen concentration value
+  float Toluen = MQ135.readSensor(); // Sensor will read PPM concentration using the model, a and b values set previously or from the setup
+
+  MQ135.setA(102.2 ); MQ135.setB(-2.473); // Configure the equation to calculate NH4 concentration value
+  float NH4 = MQ135.readSensor(); // Sensor will read PPM concentration using the model, a and b values set previously or from the setup
+
+  MQ135.setA(34.668); MQ135.setB(-3.369); // Configure the equation to calculate Aceton concentration value
+  float Aceton = MQ135.readSensor(); // Sensor will read PPM concentration using the model, a and b values set previously or from the setup
+  Serial.print("|   "); Serial.print(CO); 
+  Serial.print("   |   "); Serial.print(Alcohol);
+  // Note: 200 Offset for CO2 source:     
+  /*
+  Motivation:
+  We have added 200 PPM because when the library is calibrated it assumes the current state of the
+  air as 0 PPM, and it is considered today that the CO2 present in the atmosphere is around 400 PPM.*/
+  Serial.print("   |   "); Serial.print(CO2 + 400); 
+  Serial.print("   |   "); Serial.print(CO); 
+  Serial.print("   |   "); Serial.print(NH4); 
+  Serial.print("   |   "); Serial.print(Toluen);
+  Serial.println("   |"); 
+  /*
+    Exponential regression:
+  GAS      | a      | b
+  CO       | 605.18 | -3.937  
+  Alcohol  | 77.255 | -3.18 
+  CO2      | 110.47 | -2.862
+  Toluen  | 44.947 | -3.445
+  NH4      | 102.2  | -2.473
+  Aceton  | 34.668 | -3.369
+  */
+
+  delay(500); //Sampling frequency
+
+}
